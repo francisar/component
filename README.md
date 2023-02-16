@@ -1,1 +1,1 @@
-# component
+# go component
