@@ -2,5 +2,8 @@ package config
 
 import "errors"
 
-// ErrConfigNotSupport 尚未支持
-var ErrConfigNotSupport = errors.New("config: not support")
+var (
+	ErrConfigNotSupport = errors.New("config: not support")
+	ErrProviderNotExist = errors.New("config: provider not exist")
+	ErrCodecNotExist = errors.New("config: codec not exist")
+)

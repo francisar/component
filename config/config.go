@@ -268,12 +268,20 @@ var providerMap = make(map[string]DataProvider)
 
 // RegisterProvider 注册配置服务提供者组件
 func RegisterProvider(p DataProvider) {
+	lock.Lock()
 	providerMap[p.Name()] = p
+	lock.Unlock()
 }
 
 // GetProvider 根据名字获取provider
-func GetProvider(name string) DataProvider {
-	return providerMap[name]
+func GetProvider(name string) (DataProvider, error) {
+	lock.RLock()
+	defer lock.RUnlock()
+	p, ok := providerMap[name]
+	if !ok {
+		return nil, ErrProviderNotExist
+	}
+	return p, nil
 }
 
 var (
@@ -289,11 +297,14 @@ func RegisterCodec(c Codec) {
 }
 
 // GetCodec 根据名字获取Codec
-func GetCodec(name string) Codec {
+func GetCodec(name string) (Codec, error) {
 	lock.RLock()
-	c := codecMap[name]
-	lock.RUnlock()
-	return c
+	defer lock.RUnlock()
+	c,ok := codecMap[name]
+	if !ok {
+		return nil, ErrCodecNotExist
+	}
+	return c, nil
 }
 
 
