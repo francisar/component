@@ -3,7 +3,6 @@ package mutex
 import (
 	"context"
 	"github.com/francisar/component/nosql/redis"
-	orgredis "github.com/go-redis/redis/v8"
 	"time"
 )
 
@@ -37,10 +36,9 @@ func NewRedisMutexServiceFromOps(ops *redis.Option) LockService {
 	return &service
 }
 
-func NewRedisMutexServiceFromClient(client orgredis.Client) LockService {
-	redisClient := redis.NewRedisClient(client)
+func NewRedisMutexServiceFromClient(client redis.Client) LockService {
 	service := redisMutexService{
-		client: redisClient,
+		client: client,
 	}
 	return &service
 }
