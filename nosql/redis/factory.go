@@ -8,7 +8,7 @@ import (
 func NewRedisClientFromOps(ops *Option) Client {
 
 	switch ops.IsCluster {
-	case true:
+	case false:
 		redisOps := redis.Options{
 			Password: ops.Password,
 			Username: ops.UserName,
@@ -22,7 +22,7 @@ func NewRedisClientFromOps(ops *Option) Client {
 			client: redis.NewClient(&redisOps),
 		}
 		return &client
-	case false:
+	case true:
 		redisOps := redis.ClusterOptions{
 			Password: ops.Password,
 			Username: ops.UserName,
