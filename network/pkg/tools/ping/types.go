@@ -1,6 +1,7 @@
 package ping
 
 import (
+	"golang.org/x/net/ipv4"
 	"net"
 	"time"
 )
@@ -8,14 +9,16 @@ import (
 
 type ICMPResponse struct {
 	// Rtt is the round-trip time it took to ping.
-	Rtt time.Duration
-	Seq int
+	ICMPRet  ipv4.ICMPType
+	Rtt      time.Duration
+	Seq      int
 	ID       int
-	Code int
-	Body []byte
+	Code     int
+	Body     []byte
 	TTL      int         // time-to-live
 	Src      net.IP      // source address
 	Dst      net.IP      // destination address
+	Timeout  bool
 }
 
 const (

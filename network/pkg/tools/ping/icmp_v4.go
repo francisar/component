@@ -16,12 +16,13 @@ type pingV4 struct {
 	Seq int
 	conn *net.IPConn
 	raddr *net.IPAddr
+	laddr *net.IPAddr
 	timeout time.Duration
 	dataSize int
 }
 
-func NewPingV4(raddr *net.IPAddr, timeout time.Duration, Identify int) (Ping, error) {
-	con, err := net.DialIP("ip4:icmp", nil, raddr)
+func NewPingV4(laddr *net.IPAddr, raddr *net.IPAddr, timeout time.Duration, Identify int) (Ping, error) {
+	con, err := net.DialIP("ip4:icmp", laddr, raddr)
 	if err != nil {
 		return nil, err
 	}
@@ -29,6 +30,7 @@ func NewPingV4(raddr *net.IPAddr, timeout time.Duration, Identify int) (Ping, er
 		Id: Identify,
 		conn: con,
 		raddr: raddr,
+		laddr: laddr,
 		Seq: 0,
 		timeout:timeout,
 		dataSize:maxDataSize,
@@ -88,6 +90,18 @@ func (p *pingV4)RecvIcmp() (*ICMPResponse,error) {
 	//读取连接返回的数据，将数据放入rec中
 	n,err := p.conn.Read(rec)
 	if err != nil {
+		if e, ok := err.(net.Error); ok && e.Timeout() {
+			icmpResponse := ICMPResponse{
+				Src: p.laddr.IP,
+				Dst: p.raddr.IP,
+				Code: -1,
+				TTL: -1,
+				ID: p.Id,
+				Seq: p.Seq,
+				Timeout: true,
+			}
+			return &icmpResponse, nil
+		}
 		icmpErr := NewIcmpError("recv data faild").withError(err)
 		return nil, icmpErr
 	}
@@ -123,7 +137,33 @@ func (p *pingV4)RecvIcmp() (*ICMPResponse,error) {
 			TTL: ipv4header.TTL,
 			ID: ID,
 			Seq: Seq,
-
+			Timeout: false,
+			ICMPRet: icmpType,
+		}
+		return &icmpResponse, nil
+	case ipv4.ICMPTypeDestinationUnreachable:
+		message := responseData[4:]
+		icmpResponse := ICMPResponse{
+			ICMPRet: icmpType,
+			Code: echoMsg.Code,
+			Body: message[timeSliceLength:],
+			Src: ipv4header.Dst,
+			Timeout: false,
+		}
+		prePacketHeader,err := icmp.ParseIPv4Header(message)
+		if err == nil {
+			icmpResponse.Src = prePacketHeader.Src
+			icmpResponse.Dst = prePacketHeader.Dst
+			preEchoMsg,MsgErr := icmp.ParseMessage(protocolICMP,rec[prePacketHeader.Len:])
+			if MsgErr == nil {
+				echoByte, _ := preEchoMsg.Body.Marshal(ipv4.ICMPTypeEcho.Protocol())
+				echo, tempErr := parseEcho(protocolICMP, ipv4.ICMPTypeEcho, echoByte)
+				if tempErr == nil {
+					icmpResponse.ID = echo.ID
+					icmpResponse.Seq = echo.Seq
+				}
+			}
+			icmpResponse.Body = message[prePacketHeader.Len:]
 		}
 		return &icmpResponse, nil
 	default:
@@ -132,4 +172,9 @@ func (p *pingV4)RecvIcmp() (*ICMPResponse,error) {
 		return nil, icmpErr
 	}
 
+}
+
+
+func (p *pingV4)Close() error {
+	return p.conn.Close()
 }

@@ -15,14 +15,15 @@ type udpV4 struct {
 	Id int
 	Seq int
 	conn *icmp.PacketConn
+	laddr *net.IPAddr
 	raddr *net.IPAddr
 	timeout time.Duration
 	dataSize int
 }
 
 
-func NewUdpV4(raddr *net.IPAddr, timeout time.Duration, Identify int) (Ping, error) {
-	con, err := icmp.ListenPacket("udp4", "0.0.0.0")
+func NewUdpV4(laddr *net.IPAddr, raddr *net.IPAddr,  timeout time.Duration, Identify int) (Ping, error) {
+	con, err := icmp.ListenPacket("udp4", laddr.IP.String())
 	if err != nil {
 		return nil, err
 	}
@@ -34,6 +35,7 @@ func NewUdpV4(raddr *net.IPAddr, timeout time.Duration, Identify int) (Ping, err
 	ping := udpV4{
 		Id: Identify,
 		conn: con,
+		laddr: laddr,
 		raddr: raddr,
 		Seq: 0,
 		timeout:timeout,
@@ -75,7 +77,7 @@ func (p *udpV4)SendIcmp(data []byte) error {
 		icmpErr := NewIcmpError("data to binary buffer failed").withError(err)
 		return icmpErr
 	}
-	dst := &net.UDPAddr{IP: p.raddr.IP, Zone: p.raddr.Zone}
+	dst := &net.UDPAddr{IP: p.raddr.IP}
 	_, err = p.conn.WriteTo(buffer.Bytes(), dst)
 	if err != nil {
 		icmpErr := NewIcmpError("send data faild").withError(err)
@@ -93,18 +95,33 @@ func (p *udpV4)RecvIcmp() (*ICMPResponse,error) {
 	}
 	//构建接受的比特数组
 	rec := make([]byte,maxDataSize)
-	n, cm, _, err := p.conn.IPv4PacketConn().ReadFrom(rec)
+
+	n, _, err := p.conn.ReadFrom(rec)
+	// n,_,err := p.conn.ReadFrom(rec)
 	if err != nil {
+		if e, ok := err.(net.Error); ok && e.Timeout() {
+			icmpResponse := ICMPResponse{
+				Src: p.laddr.IP,
+				Dst: p.raddr.IP,
+				Code: -1,
+				TTL: -1,
+				ID: p.Id,
+				Seq: p.Seq,
+				Timeout: true,
+			}
+			return &icmpResponse, nil
+		}
+
 		icmpErr := NewIcmpError("recv data faild").withError(err)
 		return nil, icmpErr
 	}
-	var sourceAddr net.IP
-	var ttl int
-	if cm != nil {
-		sourceAddr = cm.Dst
-		ttl = cm.TTL
+
+	ipv4header,err := icmp.ParseIPv4Header(rec)
+	if err != nil {
+		icmpErr := NewIcmpError("ParseIPv4Header faild").withError(err)
+		return nil, icmpErr
 	}
-	echoMsg,err := icmp.ParseMessage(protocolICMP,rec[:n])
+	echoMsg,err := icmp.ParseMessage(protocolICMP,rec[ipv4header.Len:n])
 	icmpType, ok := echoMsg.Type.(ipv4.ICMPType)
 	if !ok {
 		icmpErr := NewIcmpError("resovle icmp type failed")
@@ -126,12 +143,39 @@ func (p *udpV4)RecvIcmp() (*ICMPResponse,error) {
 			Code: echoMsg.Code,
 			Rtt: rtt,
 			Body: message[timeSliceLength:],
-			Dst: p.raddr.IP,
-			Src: sourceAddr,
-			TTL: ttl,
+			Dst: ipv4header.Src,
+			Src: ipv4header.Dst,
+			TTL: ipv4header.TTL,
 			ID: ID,
 			Seq: Seq,
-
+			Timeout: false,
+			ICMPRet: icmpType,
+		}
+		return &icmpResponse, nil
+	case ipv4.ICMPTypeDestinationUnreachable:
+		message := responseData[4:]
+		icmpResponse := ICMPResponse{
+			ICMPRet: icmpType,
+			Code: echoMsg.Code,
+			Body: message[timeSliceLength:],
+			Src: ipv4header.Dst,
+			Timeout: false,
+			TTL: ipv4header.TTL,
+		}
+		prePacketHeader,err := icmp.ParseIPv4Header(message)
+		if err == nil {
+			icmpResponse.Src = prePacketHeader.Src
+			icmpResponse.Dst = prePacketHeader.Dst
+			preEchoMsg,MsgErr := icmp.ParseMessage(protocolICMP,rec[prePacketHeader.Len:])
+			if MsgErr == nil {
+				echoByte, _ := preEchoMsg.Body.Marshal(ipv4.ICMPTypeEcho.Protocol())
+				echo, tempErr := parseEcho(protocolICMP, ipv4.ICMPTypeEcho, echoByte)
+				if tempErr == nil {
+					icmpResponse.ID = echo.ID
+					icmpResponse.Seq = echo.Seq
+				}
+			}
+			icmpResponse.Body = message[prePacketHeader.Len:]
 		}
 		return &icmpResponse, nil
 	default:
@@ -139,5 +183,8 @@ func (p *udpV4)RecvIcmp() (*ICMPResponse,error) {
 		icmpErr := NewIcmpError(msg)
 		return nil, icmpErr
 	}
+}
 
+func (p *udpV4)Close() error {
+	return p.conn.Close()
 }

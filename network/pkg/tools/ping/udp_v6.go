@@ -141,3 +141,7 @@ func (p *udpV6)RecvIcmp() (*ICMPResponse,error) {
 	}
 
 }
+
+func (p *udpV6)Close() error {
+	return p.conn.Close()
+}

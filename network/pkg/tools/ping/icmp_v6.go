@@ -132,3 +132,8 @@ func (p *pingV6)RecvIcmp() (*ICMPResponse,error) {
 	}
 
 }
+
+
+func (p *pingV6)Close() error {
+	return p.conn.Close()
+}
